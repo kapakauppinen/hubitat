@@ -1,6 +1,5 @@
 /*
- * Electricity price api 
-
+ * Electricity price api
  */
 import java.text.SimpleDateFormat
 
@@ -9,18 +8,18 @@ metadata {
         capability "Sensor"
 		capability "Polling"
 		capability "Refresh"
-		attribute "PriceListToday", "HashMap"     
+		attribute "PriceListToday", "HashMap"
         attribute "CurrentPrice", "NUMBER"
-	command "clearStateVariables" 
+	command "clearStateVariables"
     }
 }
 
 preferences {
     section("Security") {
         input "securityToken", "text", title: "entsoe Token", required: true
-        // Area code can be found at 
+        // Area code can be found at
         // https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html#_areas
-        // look for BZN + your zone 
+        // look for BZN + your zone
         // FI = 10YFI-1--------U
         // SE3 = 10Y1001A1001A46L
         input "areaCode", "text", title: "Area Code", required: true
@@ -30,7 +29,7 @@ preferences {
 
 def clearStateVariables(){
     device.deleteCurrentState('PriceListToday')
-     state.clear()   
+    state.clear()
 }
 
 def logsOff() {
@@ -44,8 +43,8 @@ def updated() {
     if (logEnable) runIn(1800, logsOff)
 }
 
-def getParams() 
-	{ 
+def getParams()
+	{
         def date = new Date()
         def sdf = new SimpleDateFormat("yyyyMMdd")
 
@@ -55,12 +54,7 @@ def getParams()
 
         //documentation can be found
         // https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html
-        // Area code is from: https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html#_areas
-        // look for BZN|<your zone>
-        // Fi = 10YFI-1--------U
-        // SE3 = 10Y1001A1001A46L
-
-	    "https://transparency.entsoe.eu/api?securityToken=${securityToken}&documentType=A44&in_Domain=${areaCode}&out_Domain=${areaCode}&periodStart=${start}0000&periodEnd=${end}2300" 
+	    "https://transparency.entsoe.eu/api?securityToken=${securityToken}&documentType=A44&in_Domain=${areaCode}&out_Domain=${areaCode}&periodStart=${start}0000&periodEnd=${end}2300"
 	}
 
 def poll () {
@@ -76,9 +70,9 @@ def poll () {
     def todayString =device.currentValue("PriceListToday").substring(1, device.currentValue("PriceListToday").length() - 1)
 
     //string to hasmap
-    for(String keyValue : todayString.split(",")) {    
+    for(String keyValue : todayString.split(",")) {
 
-        String[] pairs = keyValue.split("=", 2)    
+        String[] pairs = keyValue.split("=", 2)
         today.put(pairs[0].trim(), pairs.length == 1 ? "" : pairs[1].trim());
     }
 
@@ -88,19 +82,19 @@ def poll () {
 
     if(x)
         sendEvent(name: "CurrentPrice", value: x.value)
-        if (logEnable) 
+        if (logEnable)
             log.debug  x.value
 }
 
 def refresh() {
-    if (logEnable) 
+    if (logEnable)
 	log.debug "Refresh"
 
 	def responseBody
 
 	try {
 		
-		httpGet([uri: getParams(),contentType: "text/xml"]) { resp -> 
+		httpGet([uri: getParams(),contentType: "text/xml"]) { resp ->
 			responseBody =  resp.getData() /*.TimeSeries[0].Period.Point[13].'price.amount'*/
 	    }
         //2022-10-13T22:00Z
@@ -113,7 +107,7 @@ def refresh() {
         //def hmap
         HashMap<String, String> today = new HashMap<String, String>()
 
-        Calendar calendar = new GregorianCalendar();   
+        Calendar calendar = new GregorianCalendar();
         def dateLabel
 
         //get the Timeseries from the Data
@@ -126,14 +120,14 @@ def refresh() {
 
                 //get the price (inc vat for each hour)
                 it.Period.Point.each {
-                    calendar.add(Calendar.HOUR, it.position.text().toString() as Integer); 
+                    calendar.add(Calendar.HOUR, it.position.text().toString() as Integer);
                     dateLabel = calendar.getTime().format("yyyyMMddHHmm", outputTZ)
                     calendar.setTime (timeserieDate)
                     // replace number in row below with your currancy factor
-                    today.put(dateLabel, (Float.parseFloat(it.'price.amount'.text().toString())*1.103).round(2));               
+                    today.put(dateLabel, (Float.parseFloat(it.'price.amount'.text().toString())*1.103).round(2));
                 }
 
-                //log.debug     
+                //log.debug
 
             }
             catch (Exception ex) {
@@ -143,8 +137,6 @@ def refresh() {
         today = today.sort { it.key }
 
 		sendEvent(name: "PriceListToday", value: today)
-
-		
 	} 
 	catch(Exception e) {
 		log.debug "error occured calling httpget ${e}"
