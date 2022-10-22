@@ -23,6 +23,9 @@ preferences {
         // FI = 10YFI-1--------U
         // SE3 = 10Y1001A1001A46L
         input "areaCode", "text", title: "Area Code", required: true
+	    input "VAT", "number", title:"VAT%", required: true
+	    input "currencyFactor", "number", title:"CurrencyFactor", required: true, defaultvalue: 1
+        input "timeZone", "text", title:"Timezone", required:true, defaultvalue:"GMT+5"
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
     }
 }
@@ -99,7 +102,7 @@ def refresh() {
 	    }
         //2022-10-13T22:00Z
         def pattern = "yyyy-MM-dd'T'HH:mm'Z'"
-        def outputTZ = TimeZone.getTimeZone('GMT+3')
+        def outputTZ = TimeZone.getTimeZone(timeZone)
         def date =  Date.parse(pattern,responseBody.TimeSeries[0].Period.timeInterval.start.text().toString())
         def convertedDate = date.format("yyyyMMddHHmm", outputTZ)
         def timeserieDate
@@ -109,6 +112,10 @@ def refresh() {
 
         Calendar calendar = new GregorianCalendar();
         def dateLabel
+        
+        //Price is in MegaWatts, we want it to kilowatts
+        Double vatMultiplier =  (1+((VAT/100)))/10
+       
 
         //get the Timeseries from the Data
         responseBody.TimeSeries.each {
@@ -123,8 +130,9 @@ def refresh() {
                     calendar.add(Calendar.HOUR, it.position.text().toString() as Integer);
                     dateLabel = calendar.getTime().format("yyyyMMddHHmm", outputTZ)
                     calendar.setTime (timeserieDate)
+                  
                     // replace number in row below with your currancy factor
-                    today.put(dateLabel, (Float.parseFloat(it.'price.amount'.text().toString())*1.103).round(2));
+			today.put(dateLabel, (Float.parseFloat(it.'price.amount'.text().toString())*currencyFactor*vatMultiplier).round(2));
                 }
 
                 //log.debug
