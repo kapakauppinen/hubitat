@@ -88,6 +88,17 @@ def poll () {
         if (logEnable)
             log.debug  x.value
 }
+def installed() {
+    log.info "installed() called"
+	sendEvent(name: "PriceListToday", value: "{}")
+    	updated()
+}
+
+def initialize() {
+    
+	log.info "initialize() called"
+	sendEvent(name: "PriceListToday", value: "{}")
+}
 
 def refresh() {
     if (logEnable)
