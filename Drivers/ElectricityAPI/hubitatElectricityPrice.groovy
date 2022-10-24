@@ -6,6 +6,7 @@ import java.text.SimpleDateFormat
 metadata {
     definition(name: "Electricity price", namespace: "kapakauppinen", author: "Kari Kauppinen", importUrl: "") {
         capability "Sensor"
+        capability "Initialize"
 		capability "Polling"
 		capability "Refresh"
 		attribute "PriceListToday", "HashMap"
