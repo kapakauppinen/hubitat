@@ -144,7 +144,7 @@ def refresh() {
                     calendar.setTime (timeserieDate)
                   
                     // replace number in row below with your currancy factor
-			today.put(dateLabel, (Float.parseFloat(it.'price.amount'.text().toString())*currencyFactor*vatMultiplier).round(2));
+			today.put(dateLabel, (Float.parseFloat(it.'price.amount'.text().toString())*Float.parseFloat(currencyFactor.toString())*vatMultiplier).round(2));
                 }
 
                 //log.debug
