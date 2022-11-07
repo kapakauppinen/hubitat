@@ -10,8 +10,12 @@ metadata {
 		capability "Polling"
 		capability "Refresh"
 		attribute "PriceListToday", "HashMap"
+        /* created for testing */
+        //attribute "PriceRankList", "HashMap"
+        
         attribute "CurrentPrice", "NUMBER"
-	command "clearStateVariables"
+        attribute "CurrentRank", "NUMBER"
+	    command "clearStateVariables"
     }
 }
 
@@ -33,6 +37,9 @@ preferences {
 
 def clearStateVariables(){
     device.deleteCurrentState('PriceListToday')
+    
+    //device.deleteCurrentState('PriceRankList')
+    
     state.clear()
 }
 
@@ -67,8 +74,12 @@ def poll () {
 
     def date = new Date()
     def sdf = new SimpleDateFormat("yyyyMMddHH00")
+    def dateFormat = new SimpleDateFormat("yyyyMMdd")
     def currenttime = sdf.format(date).toString()
+    def currentdate = dateFormat.format(date).toString()
     HashMap<String, String> today = new HashMap<String, String>()
+    HashMap<String, String> rank = new HashMap<String, String>()
+    
 
     //remove {}
     def todayString =device.currentValue("PriceListToday").substring(1, device.currentValue("PriceListToday").length() - 1)
@@ -81,9 +92,20 @@ def poll () {
     }
 
     today = today.sort { it.key }
+    
+    rank = today.sort { it.value}
+    rank = rank.findAll {it.key.startsWith(currentdate)}
+    
+    //sendEvent(name: "PriceRankList", value: rank)
+    def y = rank.findIndexOf{ it.key == currenttime }
+     if(y)
+        sendEvent(name: "CurrentRank", value: y)
+    
+    
 
     def x = today.find{ it.key == currenttime }
 
+    
     if(x)
         sendEvent(name: "CurrentPrice", value: x.value)
         if (logEnable)
@@ -128,7 +150,7 @@ def refresh() {
         //Price is in MegaWatts, we want it to kilowatts
         Double vatMultiplier =  (1+((VAT/100)))/10
        
-
+log.debug currencyFactor
         //get the Timeseries from the Data
         responseBody.TimeSeries.each {
 
