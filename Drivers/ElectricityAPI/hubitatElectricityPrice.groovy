@@ -60,8 +60,8 @@ def getParams()
         def sdf = new SimpleDateFormat("yyyyMMdd")
 
         sdf.format(date)
-	    def start = sdf.format(date).toString()
-  	    def end = sdf.format(date.plus(1)).toString()
+	def start = sdf.format(date).toString()
+  	def end = sdf.format(date.plus(1)).toString()
 
         //documentation can be found
         // https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html
@@ -77,8 +77,8 @@ def poll () {
     def dateFormat = new SimpleDateFormat("yyyyMMdd")
     def currenttime = sdf.format(date).toString()
     def currentdate = dateFormat.format(date).toString()
-    HashMap<String, String> today = new HashMap<String, String>()
-    HashMap<String, String> rank = new HashMap<String, String>()
+    HashMap<String, String> today = new HashMap<String, Float>()
+    HashMap<String, String> rank = new HashMap<String, Float>()
     
 
     //remove {}
@@ -86,15 +86,15 @@ def poll () {
 
     //string to hasmap
     for(String keyValue : todayString.split(",")) {
-
         String[] pairs = keyValue.split("=", 2)
-        today.put(pairs[0].trim(), pairs.length == 1 ? "" : pairs[1].trim());
+        today.put(pairs[0].trim(), pairs.length == 1 ? "" : Float.parseFloat(pairs[1].trim()));
     }
 
     today = today.sort { it.key }
     
     rank = today.sort { it.value}
     rank = rank.findAll {it.key.startsWith(currentdate)}
+    //rank = rank.unique()
     
     //sendEvent(name: "PriceRankList", value: rank)
     def y = rank.findIndexOf{ it.key == currenttime }
