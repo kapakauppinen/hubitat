@@ -60,8 +60,8 @@ def getParams()
         def sdf = new SimpleDateFormat("yyyyMMdd")
 
         sdf.format(date)
-	def start = sdf.format(date).toString()
-  	def end = sdf.format(date.plus(1)).toString()
+	    def start = sdf.format(date).toString()
+  	    def end = sdf.format(date.plus(1)).toString()
 
         //documentation can be found
         // https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html
@@ -86,6 +86,7 @@ def poll () {
 
     //string to hasmap
     for(String keyValue : todayString.split(",")) {
+
         String[] pairs = keyValue.split("=", 2)
         today.put(pairs[0].trim(), pairs.length == 1 ? "" : Float.parseFloat(pairs[1].trim()));
     }
@@ -98,7 +99,7 @@ def poll () {
     
     //sendEvent(name: "PriceRankList", value: rank)
     def y = rank.findIndexOf{ it.key == currenttime }
-     if(y)
+     //if(y)
         sendEvent(name: "CurrentRank", value: y)
     
     
