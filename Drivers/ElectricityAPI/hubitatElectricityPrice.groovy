@@ -60,7 +60,7 @@ def getParams()
         def sdf = new SimpleDateFormat("yyyyMMdd")
 
         sdf.format(date)
-	    def start = sdf.format(date).toString()
+	    def start = sdf.format(date.plus(-1)).toString()
   	    def end = sdf.format(date.plus(1)).toString()
 
         //documentation can be found
@@ -151,7 +151,7 @@ def refresh() {
         //Price is in MegaWatts, we want it to kilowatts
         Double vatMultiplier =  (1+((VAT/100)))/10
        
-log.debug currencyFactor
+//log.debug currencyFactor
         //get the Timeseries from the Data
         responseBody.TimeSeries.each {
 
