@@ -22,6 +22,7 @@ metadata {
 preferences {
     section("Security") {
         input "securityToken", "text", title: "entsoe Token", required: true
+        input "WebAPIUrl","text", title: "entsoe WebAPI Url", required: true, defaultValue:"https://web-api.tp.entsoe.eu/api"
         // Area code can be found at
         // https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html#_areas
         // look for BZN + your zone
@@ -65,7 +66,7 @@ def getParams()
 
         //documentation can be found
         // https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html
-	    "https://transparency.entsoe.eu/api?securityToken=${securityToken}&documentType=A44&in_Domain=${areaCode}&out_Domain=${areaCode}&periodStart=${start}0000&periodEnd=${end}2300"
+	    "${WebAPIUrl}?securityToken=${securityToken}&documentType=A44&in_Domain=${areaCode}&out_Domain=${areaCode}&periodStart=${start}0000&periodEnd=${end}2300"
 	}
 
 def poll () {
