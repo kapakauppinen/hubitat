@@ -2,6 +2,7 @@
  * Electricity price api
  */
 import java.text.SimpleDateFormat
+import groovy.time.TimeCategory
 
 metadata {
     definition(name: "Electricity price", namespace: "kapakauppinen", author: "Kari Kauppinen", importUrl: "") {
@@ -15,6 +16,10 @@ metadata {
         
         attribute "CurrentPrice", "NUMBER"
         attribute "CurrentRank", "NUMBER"
+        
+        attribute "EVStartHour", "NUMBER"
+        attribute "EVEndHour", "NUMBER"
+        
 	    command "clearStateVariables"
     }
 }
@@ -32,7 +37,12 @@ preferences {
 	    input "VAT", "number", title:"VAT%", required: true
 	    input "currencyFactor", "number", title:"CurrencyFactor", required: true, defaultvalue: 1
         input "timeZone", "text", title:"Timezone", required:true, defaultvalue:"GMT+5"
+        
+        input name: "EVRequiredHours", type: "number", title:"How many Consecutive hours is needed for EV", required:false
+        input name: "EVChargingThresholdPrice", type: "number", title:"Threshold price to set the schedule (cents/kWh)", required:false
+        
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
+        
     }
 }
 
@@ -67,11 +77,11 @@ def getParams()
         //documentation can be found
         // https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html
 	    "${WebAPIUrl}?securityToken=${securityToken}&documentType=A44&in_Domain=${areaCode}&out_Domain=${areaCode}&periodStart=${start}0000&periodEnd=${end}2300"
-	}
+
+    }
 
 def poll () {
 
-    //refresh()
 
     def date = new Date()
     def sdf = new SimpleDateFormat("yyyyMMddHH00")
@@ -128,6 +138,9 @@ def initialize() {
 def refresh() {
     if (logEnable)
 	log.debug "Refresh"
+    
+    if (logEnable)
+    log.debug getParams()
 
 	def responseBody
 
@@ -152,7 +165,11 @@ def refresh() {
         //Price is in MegaWatts, we want it to kilowatts
         Double vatMultiplier =  (1+((VAT/100)))/10
        
-//log.debug currencyFactor
+        if (logEnable)
+            log.debug responseBody.TimeSeries
+        
+        
+        //log.debug currencyFactor
         //get the Timeseries from the Data
         responseBody.TimeSeries.each {
 
@@ -171,7 +188,6 @@ def refresh() {
 			today.put(dateLabel, (Float.parseFloat(it.'price.amount'.text().toString())*Float.parseFloat(currencyFactor.toString())*vatMultiplier).round(2));
                 }
 
-                //log.debug
 
             }
             catch (Exception ex) {
@@ -181,8 +197,89 @@ def refresh() {
         today = today.sort { it.key }
 
 		sendEvent(name: "PriceListToday", value: today)
+        
+        
+        //set the hours to enable EV charger
+        if (EVRequiredHours!= null) {
+            setEVConsecutiveHours()
+        }
+        
 	} 
 	catch(Exception e) {
 		log.debug "error occured calling httpget ${e}"
 	}
 }
+
+
+    /* calculates the cheapest consecutive hours in the future */
+    /* Can be used for example to charge EV */
+
+    def setEVConsecutiveHours(){
+
+        HashMap<String, String> today = new HashMap<String, Float>()
+        HashMap<String, String> futurePrices = new HashMap<String, Float>()
+      
+        def limit=EVRequiredHours as Integer
+        def limitPrice = EVChargingThresholdPrice as Double
+  
+     //remove {} from the PriceListToday
+        def todayString =device.currentValue("PriceListToday").substring(1, device.currentValue("PriceListToday").length() - 1)
+
+        //string to hasmap
+        for(String keyValue : todayString.split(",")) {
+
+            String[] pairs = keyValue.split("=", 2)
+            today.put(pairs[0].trim(), pairs.length == 1 ? "" : Float.parseFloat(pairs[1].trim()));
+        }
+        
+        //sort the today hashmap based on timestamp
+        today = today.sort { it.key }
+    
+        //filter out timestamp that is in the past
+        today.each { k, v ->
+            def timestamp = new SimpleDateFormat("yyyyMMddHHmm").parse(k)
+            if (timestamp.after(new Date())) {
+                 futurePrices.put(k, v)
+            }
+        }
+    
+        
+        //sort the Hashmap
+        futurePrices = futurePrices.sort { it.key }
+
+        def lowestSum = Double.MAX_VALUE
+        def lowestStart = 0
+
+        def values = futurePrices.values() as List
+        def windowSum = values[0..(limit-1)].sum()
+        def minSum = windowSum
+    
+        //calculate the lowest sum of required series
+        for (int i = 1; i <= values.size() - limit; i++) {
+            windowSum = windowSum - values[i-1] + values[i+(limit-1)]
+            if (windowSum < minSum) {
+                minSum = windowSum
+                lowestStart = i       
+            }
+        }
+
+    def lowestStartTimestamp = futurePrices.keySet()[lowestStart]
+    def timestamp = new SimpleDateFormat("yyyyMMddHHmm").parse(lowestStartTimestamp)
+ 
+    Calendar calendar = new GregorianCalendar();
+    calendar.setTime (timestamp)
+    calendar.add(Calendar.HOUR, limit);
+
+    if (minSum/limit < limitPrice) {
+        sendEvent(name: "EVStartHour", value: timestamp.getHours())
+        sendEvent(name: "EVEndHour", value: calendar.getTime().getHours())
+    }
+      else {
+           sendEvent(name: "EVStartHour", value: -1)
+           sendEvent(name: "EVEndHour", value: -1)
+        }
+
+}
+
+    
+    
