@@ -5,7 +5,7 @@ import java.text.SimpleDateFormat
 import groovy.time.TimeCategory
 
 metadata {
-    definition(name: "Electricity price", namespace: "kapakauppinen", author: "Kari Kauppinen", importUrl: "") {
+    definition(name: "Electricity price", namespace: "kapakauppinen", author: "Kari Kauppinen", importUrl: "https://github.com/kapakauppinen/hubitat/blob/main/Drivers/ElectricityAPI/hubitatElectricityPrice.groovy") {
         capability "Sensor"
         capability "Initialize"
 		capability "Polling"
@@ -50,6 +50,10 @@ preferences {
 
 def clearStateVariables(){
     device.deleteCurrentState('PriceListToday')
+    device.deleteCurrentState('CurrentPrice')
+    device.deleteCurrentState('CurrentRank')
+    device.deleteCurrentState('EVStartHour')
+    device.deleteCurrentState('EVEndHour')
     
     //device.deleteCurrentState('PriceRankList')
     
