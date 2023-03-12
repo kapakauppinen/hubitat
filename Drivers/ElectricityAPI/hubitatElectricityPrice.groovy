@@ -5,7 +5,7 @@ import java.text.SimpleDateFormat
 import groovy.time.TimeCategory
 
 metadata {
-    definition(name: "Electricity price", namespace: "kapakauppinen", author: "Kari Kauppinen", importUrl: "https://github.com/kapakauppinen/hubitat/blob/main/Drivers/ElectricityAPI/hubitatElectricityPrice.groovy") {
+    definition(name: "Electricity price", namespace: "kapakauppinen", author: "Kari Kauppinen", importUrl: "https://raw.githubusercontent.com/kapakauppinen/hubitat/main/Drivers/ElectricityAPI/hubitatElectricityPrice.groovy") {
         capability "Sensor"
         capability "Initialize"
 		capability "Polling"
