@@ -10,6 +10,7 @@ metadata {
         capability "Initialize"
 		capability "Polling"
 		capability "Refresh"
+        capability "EnergyMeter"
 		attribute "PriceListToday", "HashMap"
         /* created for testing */
         //attribute "PriceRankList", "HashMap"
@@ -21,6 +22,7 @@ metadata {
         attribute "EVEndHour", "NUMBER"
         
 	    command "clearStateVariables"
+        command "setEVConsecutiveHours"
     }
 }
 
@@ -198,11 +200,12 @@ def refresh() {
 
 		sendEvent(name: "PriceListToday", value: today)
         
+        //removed, because of the dealy in sendEvent.
         
         //set the hours to enable EV charger
-        if (EVRequiredHours!= null) {
-            setEVConsecutiveHours()
-        }
+        //if (EVRequiredHours!= null) {
+        //    setEVConsecutiveHours()
+        //}
         
 	} 
 	catch(Exception e) {
@@ -270,7 +273,7 @@ def refresh() {
     calendar.setTime (timestamp)
     calendar.add(Calendar.HOUR, limit);
 
-    if (minSum/limit < limitPrice) {
+        if (minSum/limit < limitPrice || limitPrice == null) {
         sendEvent(name: "EVStartHour", value: timestamp.getHours())
         sendEvent(name: "EVEndHour", value: calendar.getTime().getHours())
     }
