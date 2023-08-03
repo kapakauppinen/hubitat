@@ -321,8 +321,7 @@ def refresh() {
       else {
            sendEvent(name: "EVStartHour", value: -1)
            sendEvent(name: "EVEndHour", value: -1)
-		    sendEvent(name: "EVStartHourEpoch", value: -1)
-           sendEvent(name: "EVEndHourEpoch", value: -1)
+	
         }
 
 }
