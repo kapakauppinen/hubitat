@@ -20,7 +20,10 @@ metadata {
         
         attribute "EVStartHour", "NUMBER"
         attribute "EVEndHour", "NUMBER"
-        
+		
+//        attribute "EVStartHourEpoch", "NUMBER"
+//        attribute "EVEndHourEpoch", "NUMBER"
+		
 	    command "clearStateVariables"
         command "setEVConsecutiveHours"
     }
@@ -44,6 +47,7 @@ preferences {
         input name: "EVChargingThresholdPrice", type: "number", title:"Threshold price to set the schedule (cents/kWh)", required:false
         
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
+        input name: "EVTimeType", type: "enum" , title:"Type of time of EVHour attributes",  options: ["hour","epoch"] ,defaultValue: "hour"
         
     }
 }
@@ -54,6 +58,8 @@ def clearStateVariables(){
     device.deleteCurrentState('CurrentRank')
     device.deleteCurrentState('EVStartHour')
     device.deleteCurrentState('EVEndHour')
+	  device.deleteCurrentState('EVStartHourEpoch')
+    device.deleteCurrentState('EVEndHourEpoch')
     
     //device.deleteCurrentState('PriceRankList')
     
@@ -221,7 +227,7 @@ def refresh() {
     /* calculates the cheapest consecutive hours in the future */
     /* Can be used for example to charge EV */
 
-    def setEVConsecutiveHours(){
+  def setEVConsecutiveHours(){
 
         HashMap<String, String> today = new HashMap<String, Float>()
         HashMap<String, String> futurePrices = new HashMap<String, Float>()
@@ -278,12 +284,45 @@ def refresh() {
     calendar.add(Calendar.HOUR, limit);
 
         if (minSum/limit < limitPrice || limitPrice == null) {
-        sendEvent(name: "EVStartHour", value: timestamp.getHours())
-        sendEvent(name: "EVEndHour", value: calendar.getTime().getHours())
+            //change to epoch
+            //log.debug (EVTimeType)
+            
+            switch(EVTimeType) { 
+               case "hour": 
+                    sendEvent(name: "EVStartHour", value: timestamp.getHours())
+                    sendEvent(name: "EVEndHour", value: calendar.getTime().getHours())
+                    break
+               case "epoch":
+                //in this case we have find out, if the current date is smaller than the endDate.
+                //if so we don't set the date 
+                if (new Date().getTime() > device.currentValue("EVEndHour")) {
+                   sendEvent(name: "EVStartHour", value: timestamp.getTime())
+                   sendEvent(name: "EVEndHour", value: calendar.getTime().getTime())
+                }
+                else {
+                    if (logEnable) {
+
+                        log.debug "Times not set,  current date " + new Date().getTime() + " is smaller than defined end date" +  device.currentValue("EVEndHour")
+                        //log.debug new Date().getTime()
+                        //log.debug device.currentValue("EVEndHour")
+                    }
+                }
+                    break
+               default:
+                   sendEvent(name: "EVStartHour", value: timestamp.getHours())
+                   sendEvent(name: "EVEndHour", value: calendar.getTime().getHours())
+                   break
+              
+            }
+                       
+       
+		
     }
       else {
            sendEvent(name: "EVStartHour", value: -1)
            sendEvent(name: "EVEndHour", value: -1)
+		    sendEvent(name: "EVStartHourEpoch", value: -1)
+           sendEvent(name: "EVEndHourEpoch", value: -1)
         }
 
 }
