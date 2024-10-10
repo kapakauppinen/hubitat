@@ -150,8 +150,8 @@ def poll() {
     def dateFormat = new SimpleDateFormat("yyyyMMdd")
     def currenttime = sdf.format(date).toString()
     def currentdate = dateFormat.format(date).toString()
-    HashMap < String, String > today = new HashMap < String, Float > ()
-    HashMap < String, String > rank = new HashMap < String, Float > ()
+    HashMap <String, String> today = new HashMap <String, Float> ()
+    HashMap <String, String> rank = new HashMap <String, Float> ()
 
 
     //remove {}
@@ -221,7 +221,7 @@ def refresh() {
         def totalPrice
 
         //def hmap
-        HashMap < String, String > today = new HashMap < String, String > ()
+        HashMap <String, String> today = new HashMap <String, String> ()
 
         Calendar calendar = new GregorianCalendar();
         def dateLabel
@@ -289,8 +289,8 @@ def refresh() {
 
   def setEVConsecutiveHours(int p_limit = EVRequiredHours){
 
-    HashMap < String, String > today = new HashMap < String, Float > ()
-    HashMap < String, String > futurePrices = new HashMap < String, Float > ()
+    HashMap <String, String> today = new HashMap <String, Float> ()
+    HashMap <String, String> futurePrices = new HashMap <String, Float> ()
       
         def limit = p_limit as Integer
     if (logEnable)
@@ -387,3 +387,6 @@ def refresh() {
     }
 
 }
+
+
+
