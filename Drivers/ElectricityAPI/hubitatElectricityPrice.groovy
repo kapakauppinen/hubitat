@@ -3,6 +3,14 @@
  */
 import java.text.SimpleDateFormat
 import groovy.time.TimeCategory
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.ZoneId
+
+
+
+
+
 
 metadata {
     definition(name: "Electricity price", namespace: "kapakauppinen", author: "Kari Kauppinen", importUrl: "https://raw.githubusercontent.com/kapakauppinen/hubitat/main/Drivers/ElectricityAPI/hubitatElectricityPrice.groovy") {
@@ -68,6 +76,24 @@ def clearHours() {
 
 }
 
+def toLocaltime(utcTimestamp)
+{
+
+// Assume the UTC timestamp is a string in ISO 8601 format
+//log.debug utcTimestamp
+// Parse the UTC timestamp
+def utcDateTime = ZonedDateTime.parse(utcTimestamp, DateTimeFormatter.ISO_DATE_TIME.withZone(ZoneId.of("CET")))
+//log.debug utcDateTime
+// Convert to local time (e.g., Europe/Helsinki for Finland)
+def localDateTime = utcDateTime.withZoneSameInstant(ZoneId.of(timeZone))
+
+// Format the local time as a string if needed
+def localTimeString = localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+
+//log.debug localTimeString
+   return localDateTime
+}
+
 def calculateTotalPrice(dateTimeString) {
     
     def electricityTax = Tax
@@ -86,6 +112,19 @@ def calculateTotalPrice(dateTimeString) {
     // Define the start and end dates for the higher price period
     def startDate = new Date(currentYear - 1900, 10, 1, 0, 0) // 10 corresponds to November (0-indexed)
     def endDate = new Date(currentYear - 1900 + 1, 3, 1, 0, 0)  // 2 corresponds to March (0-indexed)
+    
+    
+    //if the endDate year is next year startdate is greater than current date -> we are before march
+    // subtract one year
+    if (endDate.getYear()+1900 > currentYear && startDate > new Date())
+    {
+        endDate = endDate - 365
+        startDate = startDate - 365
+        // log.debug endDate
+    }
+    
+    //log.debug startDate
+   
 
     // Define the higher and lower prices
 
@@ -214,11 +253,18 @@ def refresh() {
         }
         //2022-10-13T22:00Z
         def pattern = "yyyy-MM-dd'T'HH:mm'Z'"
-        def outputTZ = TimeZone.getTimeZone(timeZone)
+        def outputTZ = TimeZone.getTimeZone("CET")
         def date = Date.parse(pattern, responseBody.TimeSeries[0].Period.timeInterval.start.text().toString())
         def convertedDate = date.format("yyyyMMddHHmm", outputTZ)
         def timeserieDate
         def totalPrice
+        def convertedDateISO = date.format("yyyy-MM-dd'T'HH:mm")
+        def localDateTime = toLocaltime(convertedDateISO)
+        def position = 0
+        def previousposition = 0
+        
+        //log.debug getParams()
+        
 
         //def hmap
         HashMap <String, String> today = new HashMap <String, String> ()
@@ -241,23 +287,63 @@ def refresh() {
             try {
                 it.Period.each {
                     timeserieDate = Date.parse(pattern, it.timeInterval.start.text().toString())
-                    calendar.setTime(timeserieDate)
+                    convertedDateISO = timeserieDate.format("yyyy-MM-dd'T'HH:mm")
+                    localDateTime = toLocaltime(convertedDateISO)
+                    
+                    //log.debug localDateTime
+                    //log.debug Date.from(localDateTime.toInstant())
+                    calendar.setTime(Date.from(localDateTime.toInstant()))
+                    def currentposition=1
+                    def currentprice=0.0
+                    def previousprice=0.0
 
+                    
+                   
 
                     //get the price (inc vat for each hour)
                     it.Point.each {
-                        calendar.add(Calendar.HOUR, it.position.text().toString() as Integer);
-                        dateLabel = calendar.getTime().format("yyyyMMddHHmm", outputTZ)
-                        calendar.setTime(timeserieDate)
-
-                        //log.debug calculateTotalPrice(dateLabel)
-                        // log.debug calculateTotalPrice (dateLabel)
-                        //log.debug (Float.parseFloat(it.'price.amount'.text().toString())*Float.parseFloat(currencyFactor.toString())*vatMultiplier).round(2)
-
-                        totalPrice = (Float.parseFloat(it.'price.amount'.text().toString()) * Float.parseFloat(currencyFactor.toString()) * vatMultiplier).round(10) + calculateTotalPrice(dateLabel).round(10)
+                        position = it.position.text().toString() as Integer
+                        currentprice = it.'price.amount'.text().toString()
+                        
+                        // entso-E has changed the xml structure
+                        // if the price in next hour is the same, the data is not present anymore                       
+                        currentposition = position - previousposition    
+                   
+                        //if there are gaps fill them
+                        if (currentposition > 1) {                                              
+                            for (int i = 1; i <= currentposition-1; i++) {                        
+                                calendar.add(Calendar.HOUR, previousposition+i);
+                                dateLabel = calendar.getTime().format("yyyyMMddHHmm")                   
+                                calendar.setTime(Date.from(localDateTime.toInstant()))
+                                totalPrice = (Float.parseFloat(previousprice) * Float.parseFloat(currencyFactor.toString()) * vatMultiplier).round(10) + calculateTotalPrice(dateLabel).round(10)
+                                today.put(dateLabel, totalPrice.round(2));               
+                            }
+                            
+                        }
+                                
+                        calendar.add(Calendar.HOUR, position);
+                        dateLabel = calendar.getTime().format("yyyyMMddHHmm")                   
+                        calendar.setTime(Date.from(localDateTime.toInstant()))
+                       
+                        totalPrice = (Float.parseFloat(currentprice) * Float.parseFloat(currencyFactor.toString()) * vatMultiplier).round(10) + calculateTotalPrice(dateLabel).round(10)
 
                         // replace number in row below with your currancy factor
                         today.put(dateLabel, totalPrice.round(2));
+                        previousposition = position
+                        previousprice = currentprice
+                        
+                    }
+                     
+                    //if lastposition is not 24 add prices at the end                      
+                    if (previousposition < 24) {
+                        for (int i = previousposition; i < 24; i++) {
+                            calendar.add(Calendar.HOUR, i);
+                            dateLabel = calendar.getTime().format("yyyyMMddHHmm")  ;
+                            calendar.setTime(Date.from(localDateTime.toInstant()))
+                            totalPrice = (Float.parseFloat(previousprice) * Float.parseFloat(currencyFactor.toString()) * vatMultiplier).round(10) + calculateTotalPrice(dateLabel).round(10)
+                            today.put(dateLabel, totalPrice.round(2));
+                           
+                        }
                     }
                 }
 
@@ -270,13 +356,7 @@ def refresh() {
 
         sendEvent(name: "PriceListToday", value: today)
 
-        //removed, because of the dealy in sendEvent.
-
-        //set the hours to enable EV charger
-        //if (EVRequiredHours!= null) {
-        //    setEVConsecutiveHours()
-        //}
-
+       
     }
     catch (Exception e) {
         log.debug "error occured calling httpget ${e}"
