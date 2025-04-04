@@ -76,21 +76,19 @@ def clearHours() {
 
 }
 
+
+/* deprecated */
 def toLocaltime(utcTimestamp)
 {
 
 // Assume the UTC timestamp is a string in ISO 8601 format
-//log.debug utcTimestamp
 // Parse the UTC timestamp
 def utcDateTime = ZonedDateTime.parse(utcTimestamp, DateTimeFormatter.ISO_DATE_TIME.withZone(ZoneId.of("CET")))
-//log.debug utcDateTime
 // Convert to local time (e.g., Europe/Helsinki for Finland)
 def localDateTime = utcDateTime.withZoneSameInstant(ZoneId.of(timeZone))
 
 // Format the local time as a string if needed
 def localTimeString = localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-
-//log.debug localTimeString
    return localDateTime
 }
 
@@ -99,7 +97,6 @@ def calculateTotalPrice(dateTimeString) {
     def electricityTax = Tax
     def electricityTransferSummer = TransferSummer
     def electricityTransferWinter = TransferWinter
-
 
     // Parse the input date string
     def dateFormat = new SimpleDateFormat("yyyyMMddHHmm")
@@ -120,15 +117,10 @@ def calculateTotalPrice(dateTimeString) {
     {
         endDate = endDate - 365
         startDate = startDate - 365
-        // log.debug endDate
     }
-    
-    //log.debug startDate
    
 
     // Define the higher and lower prices
-
-    //Float.parseFloat(currencyFactor.toString())
     
     def highPrice = (Float.parseFloat(electricityTax.toString()) + Float.parseFloat(electricityTransferWinter.toString()))
     def lowPrice = (Float.parseFloat(electricityTax.toString()) + Float.parseFloat(electricityTransferSummer.toString()))
@@ -260,11 +252,8 @@ def refresh() {
         def totalPrice
         def convertedDateISO = date.format("yyyy-MM-dd'T'HH:mm")
         def localDateTime = toLocaltime(convertedDateISO)
-        def position = 0
-        def previousposition = 0
-        
-        //log.debug getParams()
-        
+        def position = 1
+        def previousposition = 1
 
         //def hmap
         HashMap <String, String> today = new HashMap <String, String> ()
@@ -279,29 +268,29 @@ def refresh() {
         if (logEnable)
             log.debug responseBody.TimeSeries
 
-
-        //log.debug currencyFactor
         //get the Timeseries from the Data
         responseBody.TimeSeries.each {
 
             try {
                 it.Period.each {
+                  
                     timeserieDate = Date.parse(pattern, it.timeInterval.start.text().toString())
                     convertedDateISO = timeserieDate.format("yyyy-MM-dd'T'HH:mm")
-                    localDateTime = toLocaltime(convertedDateISO)
+                    DateTimeFormatter formatter = DateTimeFormatter.ISO_DATE_TIME 
+    				ZonedDateTime utcStartTime = ZonedDateTime.parse(it.timeInterval.start.text().toString(), formatter)
+                    ZonedDateTime localTime = utcStartTime.withZoneSameInstant(ZoneId.of(timeZone)).minusHours(1)
+
                     
-                    //log.debug localDateTime
-                    //log.debug Date.from(localDateTime.toInstant())
-                    calendar.setTime(Date.from(localDateTime.toInstant()))
+                    calendar.setTime(Date.from(localTime.toInstant()))
                     def currentposition=1
                     def currentprice=0.0
                     def previousprice=0.0
 
-                    
-                   
-
                     //get the price (inc vat for each hour)
                     it.Point.each {
+                         if (logEnable)
+        					log.debug  "pos: ${position} currpos: ${currentposition} prevpos: ${previousposition}"
+                   
                         position = it.position.text().toString() as Integer
                         currentprice = it.'price.amount'.text().toString()
                         
@@ -311,24 +300,33 @@ def refresh() {
                    
                         //if there are gaps fill them
                         if (currentposition > 1) {                                              
-                            for (int i = 1; i <= currentposition-1; i++) {                        
+                            for (int i = 1; i <= currentposition-1; i++) {      
+                                //log.debug  "loop pos: ${position} currpos: ${currentposition} prevpos: ${previousposition+1}"
                                 calendar.add(Calendar.HOUR, previousposition+i);
+                                
                                 dateLabel = calendar.getTime().format("yyyyMMddHHmm")                   
-                                calendar.setTime(Date.from(localDateTime.toInstant()))
+                                calendar.setTime(Date.from(localTime.toInstant()))
                                 totalPrice = (Float.parseFloat(previousprice) * Float.parseFloat(currencyFactor.toString()) * vatMultiplier).round(10) + calculateTotalPrice(dateLabel).round(10)
-                                today.put(dateLabel, totalPrice.round(2));               
+                                today.put(dateLabel, totalPrice.round(2)); 
+                                if (logEnable)
+        							log.debug  "addp: ${ previousposition+i}, label: ${dateLabel}   price: ${totalPrice.round(2)} "
                             }
                             
                         }
-                                
+                                            
                         calendar.add(Calendar.HOUR, position);
+                        
+                         
                         dateLabel = calendar.getTime().format("yyyyMMddHHmm")                   
-                        calendar.setTime(Date.from(localDateTime.toInstant()))
+                        calendar.setTime(Date.from(localTime.toInstant()))
                        
                         totalPrice = (Float.parseFloat(currentprice) * Float.parseFloat(currencyFactor.toString()) * vatMultiplier).round(10) + calculateTotalPrice(dateLabel).round(10)
 
-                        // replace number in row below with your currancy factor
+                        // replace number in row below with your currency factor
                         today.put(dateLabel, totalPrice.round(2));
+                         if (logEnable)
+        					log.debug  "addn: ${position}, label: ${dateLabel}   price: ${totalPrice.round(2)}  "
+                        
                         previousposition = position
                         previousprice = currentprice
                         
@@ -339,10 +337,11 @@ def refresh() {
                         for (int i = previousposition; i < 24; i++) {
                             calendar.add(Calendar.HOUR, i);
                             dateLabel = calendar.getTime().format("yyyyMMddHHmm")  ;
-                            calendar.setTime(Date.from(localDateTime.toInstant()))
+                            calendar.setTime(Date.from(localTime.toInstant()))
                             totalPrice = (Float.parseFloat(previousprice) * Float.parseFloat(currencyFactor.toString()) * vatMultiplier).round(10) + calculateTotalPrice(dateLabel).round(10)
                             today.put(dateLabel, totalPrice.round(2));
-                           
+                             if (logEnable)
+        						log.debug  "adda: ${ i}, label: ${dateLabel}   price: ${previousprice} "
                         }
                     }
                 }
@@ -458,8 +457,6 @@ def refresh() {
 
         }
 
-
-
     }
     else {
         sendEvent(name: "EVStartHour", value: -1)
@@ -467,6 +464,5 @@ def refresh() {
     }
 
 }
-
 
 
