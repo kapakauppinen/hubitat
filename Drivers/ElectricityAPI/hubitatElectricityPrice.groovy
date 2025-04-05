@@ -47,7 +47,7 @@ preferences {
         input "areaCode", "text", title: "Area Code", required: true
 	    input "VAT", "number", title: "VAT%", required: true
 	    input "currencyFactor", "number", title: "CurrencyFactor", required: true, defaultvalue: 1
-        input "timeZone", "text", title: "Timezone", required: true, defaultvalue: "GMT+5"
+        //input "timeZone", "text", title: "Timezone", required: true, defaultvalue: "GMT+5"
         
         input name: "EVRequiredHours", type: "number", title: "How many Consecutive hours is needed for EV", required: false
         input name: "EVChargingThresholdPrice", type: "number", title: "Threshold price to set the schedule (cents/kWh)", required: false
@@ -68,7 +68,6 @@ def clearHours() {
     sendEvent(name: "EVStartHour", value: -1)
     sendEvent(name: "EVEndHour", value: -1)
 
-
     if (logEnable)
         log.debug  "delete EVHours values"
 
@@ -77,20 +76,6 @@ def clearHours() {
 }
 
 
-/* deprecated */
-def toLocaltime(utcTimestamp)
-{
-
-// Assume the UTC timestamp is a string in ISO 8601 format
-// Parse the UTC timestamp
-def utcDateTime = ZonedDateTime.parse(utcTimestamp, DateTimeFormatter.ISO_DATE_TIME.withZone(ZoneId.of("CET")))
-// Convert to local time (e.g., Europe/Helsinki for Finland)
-def localDateTime = utcDateTime.withZoneSameInstant(ZoneId.of(timeZone))
-
-// Format the local time as a string if needed
-def localTimeString = localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-   return localDateTime
-}
 
 def calculateTotalPrice(dateTimeString) {
     
@@ -119,7 +104,6 @@ def calculateTotalPrice(dateTimeString) {
         startDate = startDate - 365
     }
    
-
     // Define the higher and lower prices
     
     def highPrice = (Float.parseFloat(electricityTax.toString()) + Float.parseFloat(electricityTransferWinter.toString()))
@@ -142,8 +126,6 @@ def clearStateVariables(){
     device.deleteCurrentState('CurrentRank')
     device.deleteCurrentState('EVStartHour')
     device.deleteCurrentState('EVEndHour')
-
-
     state.clear()
 }
 
@@ -163,18 +145,21 @@ def getParams()
         def date = new Date()
         def sdf = new SimpleDateFormat("yyyyMMdd")
 
-    sdf.format(date)
+        sdf.format(date)
+
+        //set the date range one da behind and two in advance
 	    def start = sdf.format(date.plus(-1)).toString()
   	    def end = sdf.format(date.plus(2)).toString()
 
-    //documentation can be found
+    // documentation can be found
     // https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html
     "${WebAPIUrl}?securityToken=${securityToken}&documentType=A44&in_Domain=${areaCode}&out_Domain=${areaCode}&periodStart=${start}0000&periodEnd=${end}2300"
 
 }
 
 def poll() {
-
+    
+    //get ready for the PT15M
 
     def date = new Date()
     def sdf = new SimpleDateFormat("yyyyMMddHH00")
@@ -183,7 +168,6 @@ def poll() {
     def currentdate = dateFormat.format(date).toString()
     HashMap <String, String> today = new HashMap <String, Float> ()
     HashMap <String, String> rank = new HashMap <String, Float> ()
-
 
     //remove {}
     def todayString = device.currentValue("PriceListToday").substring(1, device.currentValue("PriceListToday").length() - 1)
@@ -206,16 +190,14 @@ def poll() {
     //if(y)
     sendEvent(name: "CurrentRank", value: y)
     
-    
 
     def x = today.find{ it.key == currenttime }
-
-
     if (x)
         sendEvent(name: "CurrentPrice", value: x.value)
     if (logEnable)
         log.debug  x.value
 }
+
 def installed() {
     log.info "installed() called"
     sendEvent(name: "PriceListToday", value: "{}")
@@ -223,7 +205,6 @@ def installed() {
 }
 
 def initialize() {
-
     log.info "initialize() called"
     sendEvent(name: "PriceListToday", value: "{}")
 }
@@ -238,29 +219,28 @@ def refresh() {
 	def responseBody
 
     try {
-
+		
         httpGet([uri: getParams(), contentType: "text/xml"]) {
             resp ->
                 responseBody =  resp.getData() /*.TimeSeries[0].Period.Point[13].'price.amount'*/
         }
-        //2022-10-13T22:00Z
+        // 2022-10-13T22:00Z
         def pattern = "yyyy-MM-dd'T'HH:mm'Z'"
         def outputTZ = TimeZone.getTimeZone("CET")
         def date = Date.parse(pattern, responseBody.TimeSeries[0].Period.timeInterval.start.text().toString())
         def convertedDate = date.format("yyyyMMddHHmm", outputTZ)
-        def timeserieDate
+        
         def totalPrice
         def convertedDateISO = date.format("yyyy-MM-dd'T'HH:mm")
-        def localDateTime = toLocaltime(convertedDateISO)
+        
         def position = 1
         def previousposition = 1
 
-        //def hmap
+        // def hmap
         HashMap <String, String> today = new HashMap <String, String> ()
 
         Calendar calendar = new GregorianCalendar();
         def dateLabel
-
 
         //Price is in MegaWatts, we want it to kilowatts
         Double vatMultiplier = (1 + ((VAT.toDouble() / 100.00))) / 10.00
@@ -273,22 +253,26 @@ def refresh() {
 
             try {
                 it.Period.each {
+                   
+
+                   //format the timeserieDate to Hub Timezone
                   
-                    timeserieDate = Date.parse(pattern, it.timeInterval.start.text().toString())
-                    convertedDateISO = timeserieDate.format("yyyy-MM-dd'T'HH:mm")
                     DateTimeFormatter formatter = DateTimeFormatter.ISO_DATE_TIME 
     				ZonedDateTime utcStartTime = ZonedDateTime.parse(it.timeInterval.start.text().toString(), formatter)
+
+                    //the position starts with 1, so we subtract one hour from the start date
                     ZonedDateTime localTime = utcStartTime.withZoneSameInstant(ZoneId.of(timeZone)).minusHours(1)
 
-                    
+                    //set the calendar to period start date
                     calendar.setTime(Date.from(localTime.toInstant()))
+
                     def currentposition=1
                     def currentprice=0.0
                     def previousprice=0.0
 
                     //get the price (inc vat for each hour)
                     it.Point.each {
-                         if (logEnable)
+                        if (logEnable)
         					log.debug  "pos: ${position} currpos: ${currentposition} prevpos: ${previousposition}"
                    
                         position = it.position.text().toString() as Integer
@@ -298,7 +282,10 @@ def refresh() {
                         // if the price in next hour is the same, the data is not present anymore                       
                         currentposition = position - previousposition    
                    
+
                         //if there are gaps fill them
+                        // if PT15M we have to change the logic
+
                         if (currentposition > 1) {                                              
                             for (int i = 1; i <= currentposition-1; i++) {      
                                 //log.debug  "loop pos: ${position} currpos: ${currentposition} prevpos: ${previousposition+1}"
@@ -331,7 +318,7 @@ def refresh() {
                         previousprice = currentprice
                         
                     }
-                     
+                  
                     //if lastposition is not 24 add prices at the end                      
                     if (previousposition < 24) {
                         for (int i = previousposition; i < 24; i++) {
@@ -345,7 +332,6 @@ def refresh() {
                         }
                     }
                 }
-
             }
             catch (Exception ex) {
                 log.debug ex
@@ -353,9 +339,7 @@ def refresh() {
         }
         today = today.sort { it.key }
 
-        sendEvent(name: "PriceListToday", value: today)
-
-       
+        sendEvent(name: "PriceListToday", value: today)  
     }
     catch (Exception e) {
         log.debug "error occured calling httpget ${e}"
@@ -363,10 +347,9 @@ def refresh() {
 }
 
 
-    /* calculates the cheapest consecutive hours in the future */
-    /* Can be used for example to charge EV */
-
-  def setEVConsecutiveHours(int p_limit = EVRequiredHours){
+/* calculates the cheapest consecutive hours in the future */
+/* Can be used for example to charge EV */
+def setEVConsecutiveHours(int p_limit = EVRequiredHours){
 
     HashMap <String, String> today = new HashMap <String, Float> ()
     HashMap <String, String> futurePrices = new HashMap <String, Float> ()
@@ -381,7 +364,6 @@ def refresh() {
 
     //string to hasmap
     for (String keyValue : todayString.split(",")) {
-
         String[] pairs = keyValue.split("=", 2)
         today.put(pairs[0].trim(), pairs.length == 1 ? "" : Float.parseFloat(pairs[1].trim()));
     }
@@ -397,7 +379,6 @@ def refresh() {
             futurePrices.put(k, v)
         }
     }
-
 
     //sort the Hashmap
     futurePrices = futurePrices.sort { it.key }
@@ -426,9 +407,6 @@ def refresh() {
     calendar.add(Calendar.HOUR, limit);
 
     if (minSum / limit < limitPrice || limitPrice == null) {
-        //change to epoch
-        //log.debug (EVTimeType)
-
         switch (EVTimeType) {
             case "hour":
                 sendEvent(name: "EVStartHour", value: timestamp.getHours())
@@ -443,10 +421,7 @@ def refresh() {
                 }
                 else {
                     if (logEnable) {
-
                         log.debug "Times not set,  current date " + new Date().getTime() + " is smaller than defined end date" + device.currentValue("EVEndHour")
-                        //log.debug new Date().getTime()
-                        //log.debug device.currentValue("EVEndHour")
                     }
                 }
                 break
@@ -454,9 +429,7 @@ def refresh() {
                 sendEvent(name: "EVStartHour", value: timestamp.getHours())
                 sendEvent(name: "EVEndHour", value: calendar.getTime().getHours())
                 break
-
         }
-
     }
     else {
         sendEvent(name: "EVStartHour", value: -1)
