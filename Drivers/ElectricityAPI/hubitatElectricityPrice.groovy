@@ -23,15 +23,19 @@ metadata {
         capability "EnergyMeter"
 
         attribute "PriceListToday", "HashMap"
-         attribute "PriceList15M", "HashMap"
+        attribute "PriceList15M", "HashMap"
         attribute "CurrentPrice", "NUMBER"
         attribute "CurrentRank", "NUMBER"
         attribute "EVStartHour", "NUMBER"
         attribute "EVEndHour", "NUMBER"
+        attribute "AveragePriceToday", "NUMBER"
 
         command "clearHours"
         command "clearStateVariables"
         command "setEVConsecutiveHours"
+        
+       
+        
     }
 }
 
@@ -49,9 +53,6 @@ preferences {
 
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
 
-		//added parameter that allows to switch to old method
-        input name: "UseOldMethod", type: "bool", title: "Use old Calculation method", defaultValue: true
-		
         input name: "EVTimeType", type: "enum", title: "Type of EVHour attributes",
               options: ["hour", "epoch"], defaultValue: "hour"
         input name: "PriceResolution", type: "enum", title: "Price resolution",
@@ -60,6 +61,8 @@ preferences {
         input name: "TransferSummer", type: "number", title: "Transfer price summer", required: true
         input name: "TransferWinter", type: "number", title: "Transfer price winter", required: true
         input name: "Tax", type: "number", title: "Transfer tax", required: true
+        
+       
     }
 }
 
@@ -104,6 +107,8 @@ def clearStateVariables() {
     device.deleteCurrentState('CurrentRank')
     device.deleteCurrentState('EVStartHour')
     device.deleteCurrentState('EVEndHour')
+    device.deleteCurrentState('AveragePriceToday')
+    
     state.clear()
 }
 
@@ -123,30 +128,18 @@ def getParams() {
     def sdf = new SimpleDateFormat("yyyyMMdd")
     def start = sdf.format(date.plus(-1))
     def end   = sdf.format(date.plus(2))
-
     return "${WebAPIUrl}?securityToken=${securityToken}&documentType=A44&in_Domain=${areaCode}&out_Domain=${areaCode}&periodStart=${start}0000&periodEnd=${end}2300"
 }
 
 def refresh()
 {
-    if (UseOldMethod)  {
-        refresh_old()
-    }
-    else {
-        refresh_new()
-    }
+	refresh_new()  
 }
+
 
 def poll ()
 {
-     if (UseOldMethod)  {
-        poll_old()
-    }
-    else {
-        poll_new()
-    }
-    
-    
+	poll_new()
 }
 
 
@@ -159,7 +152,6 @@ def getPriceMap(String attributeName) {
     HashMap<String, Float> priceMap = [:]
     def priceString = device.currentValue(attributeName)
      
-
     if (!priceString) return priceMap
 
     // Poistetaan ympäröivät aaltosulkeet, jos ne ovat
@@ -221,47 +213,6 @@ def poll_new () {
 }
 
 
-def poll_old() {
-    
-    //get ready for the PT15M
-
-    def date = new Date()
-    def sdf = new SimpleDateFormat("yyyyMMddHH00")
-    def dateFormat = new SimpleDateFormat("yyyyMMdd")
-    def currenttime = sdf.format(date).toString()
-    def currentdate = dateFormat.format(date).toString()
-    HashMap <String, String> today = new HashMap <String, Float> ()
-    HashMap <String, String> rank = new HashMap <String, Float> ()
-
-    //remove {}
-    def todayString = device.currentValue("PriceListToday").substring(1, device.currentValue("PriceListToday").length() - 1)
-
-    //string to hasmap
-    for (String keyValue : todayString.split(",")) {
-
-        String[] pairs = keyValue.split("=", 2)
-        today.put(pairs[0].trim(), pairs.length == 1 ? "" : Float.parseFloat(pairs[1].trim()));
-    }
-
-    today = today.sort { it.key }
-
-    rank = today.sort { it.value }
-    rank = rank.findAll { it.key.startsWith(currentdate) }
-    //rank = rank.unique()
-
-    //sendEvent(name: "PriceRankList", value: rank)
-    def y = rank.findIndexOf{ it.key == currenttime }
-    //if(y)
-    sendEvent(name: "CurrentRank", value: y)
-    
-
-    def x = today.find{ it.key == currenttime }
-    if (x)
-        sendEvent(name: "CurrentPrice", value: x.value)
-    if (logEnable)
-        log.debug  x.value
-}
-
 def installed() {
     log.info "Installed"
     sendEvent(name: "PriceListToday", value: "{}")
@@ -272,146 +223,6 @@ def initialize() {
     log.info "Initialize"
     sendEvent(name: "PriceListToday", value: "{}")
 }
-
-def refresh_old() {
-    if (logEnable)
-        log.debug "Refresh"
-
-    if (logEnable)
-        log.debug getParams()
-
-	def responseBody
-
-    try {
-		
-        httpGet([uri: getParams(), contentType: "text/xml"]) {
-            resp ->
-                responseBody =  resp.getData() /*.TimeSeries[0].Period.Point[13].'price.amount'*/
-        }
-        // 2022-10-13T22:00Z
-        def pattern = "yyyy-MM-dd'T'HH:mm'Z'"
-        def outputTZ = TimeZone.getTimeZone("CET")
-        def date = Date.parse(pattern, responseBody.TimeSeries[0].Period.timeInterval.start.text().toString())
-        def convertedDate = date.format("yyyyMMddHHmm", outputTZ)
-        
-        def totalPrice
-        def convertedDateISO = date.format("yyyy-MM-dd'T'HH:mm")
-        
-        def position = 1
-        def previousposition = 1
-
-        // def hmap
-        HashMap <String, String> today = new HashMap <String, String> ()
-
-        Calendar calendar = new GregorianCalendar();
-        def dateLabel
-
-        //Price is in MegaWatts, we want it to kilowatts
-        Double vatMultiplier = (1 + ((VAT.toDouble() / 100.00))) / 10.00
-
-        if (logEnable)
-            log.debug responseBody.TimeSeries
-
-        //get the Timeseries from the Data
-        responseBody.TimeSeries.each {
-
-            try {
-                it.Period.each {
-                   
-
-                   //format the timeserieDate to Hub Timezone
-                  
-                    DateTimeFormatter formatter = DateTimeFormatter.ISO_DATE_TIME 
-    				ZonedDateTime utcStartTime = ZonedDateTime.parse(it.timeInterval.start.text().toString(), formatter)
-
-                    //the position starts with 1, so we subtract one hour from the start date
-                    ZonedDateTime localTime = utcStartTime.withZoneSameInstant(ZoneId.of(timeZone)).minusHours(1)
-
-                    //set the calendar to period start date
-                    calendar.setTime(Date.from(localTime.toInstant()))
-
-                    def currentposition=1
-                    def currentprice=0.0
-                    def previousprice=0.0
-
-                    //get the price (inc vat for each hour)
-                    it.Point.each {
-                        if (logEnable)
-        					log.debug  "pos: ${position} currpos: ${currentposition} prevpos: ${previousposition}"
-                   
-                        position = it.position.text().toString() as Integer
-                        currentprice = it.'price.amount'.text().toString()
-                        
-                        // entso-E has changed the xml structure
-                        // if the price in next hour is the same, the data is not present anymore                       
-                        currentposition = position - previousposition    
-                   
-
-                        //if there are gaps fill them
-                        // if PT15M we have to change the logic
-
-                        if (currentposition > 1) {                                              
-                            for (int i = 1; i <= currentposition-1; i++) {      
-                                //log.debug  "loop pos: ${position} currpos: ${currentposition} prevpos: ${previousposition+1}"
-                                calendar.add(Calendar.HOUR, previousposition+i);
-                                
-                                dateLabel = calendar.getTime().format("yyyyMMddHHmm")                   
-                                calendar.setTime(Date.from(localTime.toInstant()))
-                                totalPrice = (Float.parseFloat(previousprice) * Float.parseFloat(currencyFactor.toString()) * vatMultiplier).round(10) + calculateTotalPrice(dateLabel).round(10)
-                                today.put(dateLabel, totalPrice.round(2)); 
-                                if (logEnable)
-        							log.debug  "addp: ${ previousposition+i}, label: ${dateLabel}   price: ${totalPrice.round(2)} "
-                            }
-                            
-                        }
-                                            
-                        calendar.add(Calendar.HOUR, position);
-                        
-                         
-                        dateLabel = calendar.getTime().format("yyyyMMddHHmm")                   
-                        calendar.setTime(Date.from(localTime.toInstant()))
-                       
-                        totalPrice = (Float.parseFloat(currentprice) * Float.parseFloat(currencyFactor.toString()) * vatMultiplier).round(10) + calculateTotalPrice(dateLabel).round(10)
-
-                        // replace number in row below with your currency factor
-                        today.put(dateLabel, totalPrice.round(2));
-                         if (logEnable)
-        					log.debug  "addn: ${position}, label: ${dateLabel}   price: ${totalPrice.round(2)}  "
-                        
-                        previousposition = position
-                        previousprice = currentprice
-                        
-                    }
-                  
-                    //if lastposition is not 24 add prices at the end                      
-                    if (previousposition < 24) {
-                        for (int i = previousposition; i < 24; i++) {
-                            calendar.add(Calendar.HOUR, i);
-                            dateLabel = calendar.getTime().format("yyyyMMddHHmm")  ;
-                            calendar.setTime(Date.from(localTime.toInstant()))
-                            totalPrice = (Float.parseFloat(previousprice) * Float.parseFloat(currencyFactor.toString()) * vatMultiplier).round(10) + calculateTotalPrice(dateLabel).round(10)
-                            today.put(dateLabel, totalPrice.round(2));
-                             if (logEnable)
-        						log.debug  "adda: ${ i}, label: ${dateLabel}   price: ${previousprice} "
-                        }
-                    }
-                }
-            }
-            catch (Exception ex) {
-                log.debug ex
-            }
-        }
-        today = today.sort { it.key }
-
-        sendEvent(name: "PriceListToday", value: today)  
-    }
-    catch (Exception e) {
-        log.debug "error occured calling httpget ${e}"
-    }
-}
-
-
-        
 
 
 def refresh_new() {
@@ -429,7 +240,10 @@ def refresh_new() {
         Calendar calendar = new GregorianCalendar()
         Double vatMultiplier = (1 + (VAT.toDouble() / 100.0)) / 10.0
 
-        def resMinutes = (PriceResolution == "PT15M") ? 15 : 60
+        //Set default value, since there are no other values anymore
+        def detectedResolution = "PT15M"
+            
+        def resMinutes = (detectedResolution == "PT15M") ? 15 : 60
 
         responseBody.TimeSeries.each {
             try {
@@ -450,19 +264,11 @@ def refresh_new() {
                         def dateLabel = new SimpleDateFormat("yyyyMMddHHmm").format(pointTime)
 
                         // --- PT15M tallennus erilliseen map:iin ---
-                        if (PriceResolution == "PT15M") {
+                        if (detectedResolution == "PT15M") {
                             def totalPrice15m = (currentPrice * currencyFactor.toDouble() * vatMultiplier).round(10) +
                                                 calculateTotalPrice(dateLabel).round(10)
                             today15m.put(dateLabel, totalPrice15m.round(2))
                         }
-
-                        // --- Tuntitaso ---
-                        def totalPrice = (currentPrice * currencyFactor.toDouble() * vatMultiplier).round(10) +
-                                         calculateTotalPrice(dateLabel).round(10)
-                        today.put(dateLabel, totalPrice.round(2))
-
-                        previousPrice = currentPrice
-                        previousDateLabel = dateLabel
                     }
                 }
             } catch (Exception ex) {
@@ -471,7 +277,7 @@ def refresh_new() {
         }
 
         // Jos PT15M, laske tuntikeskiarvot erikseen
-        if (PriceResolution == "PT15M") {
+        if (detectedResolution == "PT15M") {
             HashMap<String, BigDecimal> hourly = [:]
             def grouped = today15m.groupBy { it.key.substring(0, 10) } // yyyyMMddHH
             grouped.each { hourKey, values ->
@@ -486,6 +292,16 @@ def refresh_new() {
 
         today = today.sort { it.key }
         sendEvent(name: "PriceListToday", value: today)
+        
+        
+        // Laske koko päivän keskiarvo
+		def currentDate = new SimpleDateFormat("yyyyMMdd").format(new Date())
+		def todaysValues = today.findAll { k, v -> k.startsWith(currentDate) }.values()
+
+		if (todaysValues && todaysValues.size() > 0) {
+    		def dailyAvg = (todaysValues.sum() / todaysValues.size()).round(2)
+    		sendEvent(name: "AveragePriceToday", value: dailyAvg)
+		}
 
     } catch (Exception e) {
         log.debug "Error in httpGet ${e}"
