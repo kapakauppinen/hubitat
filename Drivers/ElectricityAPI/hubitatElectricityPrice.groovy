@@ -204,11 +204,13 @@ def poll_new () {
     sendEvent(name: "CurrentPrice", value: currentPrice)
 
     // Rank lasketaan vain samoista tunnista/15min-periodista
-    def sortedEntries = priceMap.sort { it.key }
-    def rankList = sortedEntries.findAll { it.key.startsWith(keyMinute[0..7]) } // saman päivän hinnat
+    ///def sortedEntries = priceMap.sort { it.key }
+	def sortedValues = priceMap.sort { it.value }
+    
+    def rankList = sortedValues.findAll { it.key.startsWith(keyMinute[0..7]) } // saman päivän hinnat
     def rank = rankList.findIndexOf { it.key == keyMinute }
     sendEvent(name: "CurrentRank", value: rank)
-
+	
     if (logEnable) log.debug "Poll $PriceResolution → key=$keyMinute, price=$currentPrice, rank=$rank"
 }
 
