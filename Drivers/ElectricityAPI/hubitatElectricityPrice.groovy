@@ -256,12 +256,25 @@ def refresh_new() {
 
                     calendar.setTime(Date.from(localTime.toInstant()))
                     def previousPrice = 0.0
-                    def previousDateLabel = calendar.getTime().format("yyyyMMddHHmm")
+                    
+            		def prevPosition = 0
 
                     period.Point.each { point ->
                         def position = point.position.text().toInteger()
                         def currentPrice = point.'price.amount'.text().toDouble()
-
+                        
+                    	// Täytetään aukot edellisellä hinnalla, jos hyppy > 1
+              			if (previousPrice != null && (position.toLong() - prevPosition.toLong() > 1)) {
+    						for (long gap = 1L; gap < (position.toLong() - prevPosition.toLong()); gap++) {
+        						long interval = resMinutes.toLong() * 60L * 1000L
+        						def gapTime = new Date(calendar.time.time + ((prevPosition.toLong() - 1L + gap) * interval))
+        						def gapLabel = new SimpleDateFormat("yyyyMMddHHmm").format(gapTime)
+        						def gapTotal = (previousPrice * currencyFactor.toDouble() * vatMultiplier).round(10) +
+                       				calculateTotalPrice(gapLabel).round(10)
+        						today.put(gapLabel, gapTotal.round(2))
+       							if (detectedResolution == "PT15M") today15m.put(gapLabel, gapTotal.round(2))
+    						}
+						}
                         def pointTime = new Date(calendar.time.time + ((position - 1) * resMinutes * 60 * 1000))
                         def dateLabel = new SimpleDateFormat("yyyyMMddHHmm").format(pointTime)
 
@@ -271,6 +284,9 @@ def refresh_new() {
                                                 calculateTotalPrice(dateLabel).round(10)
                             today15m.put(dateLabel, totalPrice15m.round(2))
                         }
+                        
+                        prevPosition = position
+                previousPrice = currentPrice
                     }
                 }
             } catch (Exception ex) {
