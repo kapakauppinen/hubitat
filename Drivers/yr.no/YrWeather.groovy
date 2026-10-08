@@ -563,6 +563,10 @@ metadata {
             "number",
             title: "Cloudiness threshold for dark (%)",
             defaultValue: 50
+        input "debugLogging",
+    "bool",
+    title: "Enable debug logging",
+    defaultValue: false
     }
 }
 
@@ -638,6 +642,12 @@ def initialize() {
     pollWeather()
 }
 
+
+def logDebug(String message) {
+    if (settings.debugLogging == true) {
+        log.debug message
+    }
+}
 
 // ============================================================
 // WEATHER
@@ -850,7 +860,7 @@ if (cloudiness != null) {
 
     double cloudValue = cloudiness.toDouble()
 
-    log.debug "Yr cloudiness = ${cloudValue}%"
+    logDebug ("Yr cloudiness = ${cloudValue}%")
 
     sendEvent(
         name: "cloudiness",
@@ -970,7 +980,7 @@ def parseSunData(data, TimeZone tz) {
         return
     }
 
-    log.debug "Sunrise API properties = ${props}"
+    logDebug ( "Sunrise API properties = ${props}")
 
     def sunrise = parseSunEvent(props.sunrise)
     def solarNoon = parseSunEvent(props.solarnoon)
@@ -1024,12 +1034,12 @@ def parseSunData(data, TimeZone tz) {
             props.solarmidnight.disc_centre_elevation.toDouble()
     }
 
-    log.debug "Sun data: sunrise=${props.sunrise?.time}, " +
+    logDebug ("Sun data: sunrise=${props.sunrise?.time}, " +
               "solarNoon=${props.solarnoon?.time}, " +
               "noonElevation=${noonElevation}, " +
               "sunset=${props.sunset?.time}, " +
               "solarMidnight=${props.solarmidnight?.time}, " +
-              "midnightElevation=${midnightElevation}"
+              "midnightElevation=${midnightElevation}")
 
     // --------------------------------------------------------
     // CURRENT ELEVATION
@@ -1051,7 +1061,7 @@ def parseSunData(data, TimeZone tz) {
                 elevation.toDouble() * 10
             ) / 10.0
 
-        log.debug "Calculated sun elevation = ${elevation}°"
+        logDebug ("Calculated sun elevation = ${elevation}°")
 
         sendEvent(
             name: "sunElevation",
@@ -1289,144 +1299,11 @@ def calculateSunElevation(
          */
     }
 
-    log.debug "Sun elevation calculation: " +
+    logDebug ( "Sun elevation calculation: " +
               "noon=${noonElevation}°, " +
               "midnight=${midnightElevation}°, " +
               "phase=${Math.toDegrees(phase)}°, " +
-              "elevation=${elevation}°"
-
-    return elevation
-}
-def calculateSunElevation2(
-    Date now,
-    Date sunrise,
-    Date solarNoon,
-    Date sunset,
-    Date solarMidnight,
-    def props
-) {
-
-    if (!location.latitude || !location.longitude) {
-        log.warn "Cannot calculate sun elevation: Hubitat location coordinates missing"
-        return null
-    }
-
-    double latitude = location.latitude.toDouble()
-    double longitude = location.longitude.toDouble()
-
-    // Current UTC time
-    Calendar utc = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
-    utc.setTime(now)
-
-    int year = utc.get(Calendar.YEAR)
-    int dayOfYear = utc.get(Calendar.DAY_OF_YEAR)
-
-    double hour =
-        utc.get(Calendar.HOUR_OF_DAY) +
-        utc.get(Calendar.MINUTE) / 60.0 +
-        utc.get(Calendar.SECOND) / 3600.0
-
-    /*
-     * Solar position algorithm based on NOAA approximation.
-     */
-
-    double gamma =
-        2.0 * Math.PI / 365.0 *
-        (
-            dayOfYear - 1 +
-            (hour - 12.0) / 24.0
-        )
-
-    double declination =
-        0.006918 -
-        0.399912 * Math.cos(gamma) +
-        0.070257 * Math.sin(gamma) -
-        0.006758 * Math.cos(2 * gamma) +
-        0.000907 * Math.sin(2 * gamma) -
-        0.002697 * Math.cos(3 * gamma) +
-        0.001480 * Math.sin(3 * gamma)
-
-    double equationOfTime =
-        229.18 * (
-            0.000075 +
-            0.001868 * Math.cos(gamma) -
-            0.032077 * Math.sin(gamma) -
-            0.014615 * Math.cos(2 * gamma) -
-            0.040849 * Math.sin(2 * gamma)
-        )
-
-    /*
-     * UTC offset of Hubitat location.
-     */
-    TimeZone tz =
-        location.timeZone ?: TimeZone.getDefault()
-
-    int offsetMillis =
-        tz.getOffset(now.time)
-
-    double offsetHours =
-        offsetMillis / 3600000.0
-
-    /*
-     * True solar time in minutes.
-     */
-    double timeOffset =
-        equationOfTime +
-        4.0 * longitude -
-        60.0 * offsetHours
-
-    double trueSolarTime =
-        hour * 60.0 + timeOffset
-
-    /*
-     * Normalize to 0...1440.
-     */
-    while (trueSolarTime < 0) {
-        trueSolarTime += 1440
-    }
-
-    while (trueSolarTime >= 1440) {
-        trueSolarTime -= 1440
-    }
-
-    /*
-     * Solar hour angle.
-     */
-    double hourAngle =
-        trueSolarTime / 4.0 - 180.0
-
-    double latitudeRad =
-        Math.toRadians(latitude)
-
-    double hourAngleRad =
-        Math.toRadians(hourAngle)
-
-    /*
-     * Solar zenith angle.
-     */
-    double cosZenith =
-        Math.sin(latitudeRad) *
-        Math.sin(declination) +
-        Math.cos(latitudeRad) *
-        Math.cos(declination) *
-        Math.cos(hourAngleRad)
-
-    /*
-     * Protect against floating point rounding.
-     */
-    cosZenith =
-        Math.max(-1.0, Math.min(1.0, cosZenith))
-
-    double zenith =
-        Math.acos(cosZenith)
-
-    double elevation =
-        90.0 - Math.toDegrees(zenith)
-
-    log.debug "Solar calculation: lat=${latitude}, lon=${longitude}, " +
-              "day=${dayOfYear}, utcHour=${hour}, " +
-              "declination=${Math.toDegrees(declination)}, " +
-              "hourAngle=${hourAngle}, elevation=${elevation}"
+              "elevation=${elevation}°")
 
     return elevation
 }
@@ -1487,7 +1364,7 @@ def updateLightState(
         try {
             cloudiness = cloudValue.toDouble()
         } catch (ignored) {
-            log.debug(
+            log.warn(
                 "Could not convert cloudiness '${cloudValue}' to number"
             )
         }
@@ -1603,7 +1480,7 @@ def updateLightState(
     // DEBUG
     // ========================================================
 
-    log.debug(
+    logDebug(
         "Light state: elevation=${sunElevation}°, " +
         "cloudiness=${cloudiness}%, " +
         "daylight=${daylight}, " +
