@@ -645,13 +645,13 @@ def initialize() {
 
 def pollWeather() {
 
-    if (!settings.latitude || !settings.longitude) {
+    if (!location.latitude || !location.longitude) {
         log.warn "Latitude or Longitude not set"
         return
     }
 
-    def lat = settings.latitude.toDouble()
-    def lon = settings.longitude.toDouble()
+    def lat = location.latitude.toDouble()
+    def lon = location.longitude.toDouble()
 
     def url =
         "https://api.met.no/weatherapi/locationforecast/2.0/compact" +
@@ -844,16 +844,24 @@ def parseWeatherData(data) {
     // CLOUDINESS
     // ========================================================
 
-    def cloudiness =
-        latest.cloud_area_fraction
+  def cloudiness = latest?.cloud_area_fraction
 
-    if (cloudiness != null) {
+if (cloudiness != null) {
 
-        sendEvent(
-            name: "cloudiness",
-            value: cloudiness
-        )
-    }
+    double cloudValue = cloudiness.toDouble()
+
+    log.debug "Yr cloudiness = ${cloudValue}%"
+
+    sendEvent(
+        name: "cloudiness",
+        value: cloudValue,
+        unit: "%"
+    )
+
+} else {
+
+    log.warn "Yr response contains no cloud_area_fraction. instant.details = ${latest}"
+}
 }
 
 
@@ -865,6 +873,7 @@ def pollSunData() {
 
     def lat = location.latitude.toDouble()
     def lon = location.longitude.toDouble()
+    
 
     def tz =
         location.timeZone ?: TimeZone.getDefault()
@@ -952,35 +961,25 @@ def pollSunData() {
 // ============================================================
 // SUN DATA
 // ============================================================
-
 def parseSunData(data, TimeZone tz) {
 
-    def props =
-        data?.properties
+    def props = data?.properties
 
     if (!props) {
-
-        log.warn "Sunrise API returned no properties"
+        log.warn "Sunrise API returned no properties. Response = ${data}"
         return
     }
 
+    log.debug "Sunrise API properties = ${props}"
 
-    def sunrise =
-        parseSunEvent(props.sunrise)
+    def sunrise = parseSunEvent(props.sunrise)
+    def solarNoon = parseSunEvent(props.solarnoon)
+    def sunset = parseSunEvent(props.sunset)
+    def solarMidnight = parseSunEvent(props.solarmidnight)
 
-    def solarNoon =
-        parseSunEvent(props.solarnoon)
-
-    def sunset =
-        parseSunEvent(props.sunset)
-
-    def solarMidnight =
-        parseSunEvent(props.solarmidnight)
-
-
-    // ========================================================
+    // --------------------------------------------------------
     // SUNRISE
-    // ========================================================
+    // --------------------------------------------------------
 
     if (props.sunrise?.time) {
 
@@ -993,10 +992,9 @@ def parseSunData(data, TimeZone tz) {
         )
     }
 
-
-    // ========================================================
+    // --------------------------------------------------------
     // SUNSET
-    // ========================================================
+    // --------------------------------------------------------
 
     if (props.sunset?.time) {
 
@@ -1009,37 +1007,65 @@ def parseSunData(data, TimeZone tz) {
         )
     }
 
+    // --------------------------------------------------------
+    // ELEVATION VALUES FROM MET
+    // --------------------------------------------------------
 
-    // ========================================================
-    // CURRENT SUN ELEVATION
-    // ========================================================
+    Double noonElevation = null
+    Double midnightElevation = null
 
-    def elevation =
-        calculateSunElevation(
-            new Date(),
-            sunrise,
-            solarNoon,
-            sunset,
-            solarMidnight,
-            props
-        )
+    if (props.solarnoon?.disc_centre_elevation != null) {
+        noonElevation =
+            props.solarnoon.disc_centre_elevation.toDouble()
+    }
 
+    if (props.solarmidnight?.disc_centre_elevation != null) {
+        midnightElevation =
+            props.solarmidnight.disc_centre_elevation.toDouble()
+    }
+
+    log.debug "Sun data: sunrise=${props.sunrise?.time}, " +
+              "solarNoon=${props.solarnoon?.time}, " +
+              "noonElevation=${noonElevation}, " +
+              "sunset=${props.sunset?.time}, " +
+              "solarMidnight=${props.solarmidnight?.time}, " +
+              "midnightElevation=${midnightElevation}"
+
+    // --------------------------------------------------------
+    // CURRENT ELEVATION
+    // --------------------------------------------------------
+
+    def elevation = calculateSunElevation(
+        new Date(),
+        sunrise,
+        solarNoon,
+        sunset,
+        solarMidnight,
+        props
+    )
 
     if (elevation != null) {
 
         elevation =
             Math.round(
-                elevation * 10
+                elevation.toDouble() * 10
             ) / 10.0
+
+        log.debug "Calculated sun elevation = ${elevation}°"
 
         sendEvent(
             name: "sunElevation",
-            value: elevation
+            value: elevation,
+            unit: "°"
         )
 
         updateLightState(
-            elevation
+            elevation as BigDecimal
         )
+
+    } else {
+
+        log.warn "Could not calculate sun elevation"
     }
 }
 
@@ -1135,7 +1161,6 @@ def formatLocalTime(
 // ============================================================
 // SUN ELEVATION
 // ============================================================
-
 def calculateSunElevation(
     Date now,
     Date sunrise,
@@ -1145,182 +1170,266 @@ def calculateSunElevation(
     def props
 ) {
 
+    if (!solarNoon || !solarMidnight) {
+        log.warn "Cannot calculate sun elevation: solar noon/midnight missing"
+        return null
+    }
+
     /*
-     * MET defines sunrise/sunset at approximately
-     * -0.8333 degrees for the centre of the sun.
+     * MET Norway Sunrise 3.0 antaa neljä pistettä:
+     *
+     * sunrise       -> 0°
+     * solar noon    -> disc_centre_elevation
+     * sunset        -> 0°
+     * solar midnight -> disc_centre_elevation
+     *
+     * MET:n oma dokumentaatio suosittelee näiden pisteiden
+     * käyttämistä sinikäyrän arviointiin.
      */
 
-    final double HORIZON =
-        -0.8333
+    double noonElevation =
+        props?.solarnoon?.disc_centre_elevation?.toDouble()
 
+    double midnightElevation =
+        props?.solarmidnight?.disc_centre_elevation?.toDouble()
 
-    def noonElevation =
-        props.solarnoon?.disc_centre_elevation
-
-    def midnightElevation =
-        props.solarmidnight?.disc_centre_elevation
-
-
-    // ========================================================
-    // DAYLIGHT: SUNRISE -> SOLAR NOON
-    // ========================================================
-
-    if (
-        sunrise &&
-        solarNoon &&
-        now.time >= sunrise.time &&
-        now.time <= solarNoon.time
-    ) {
-
-        double fraction =
-            (now.time - sunrise.time) /
-            (double)(
-                solarNoon.time -
-                sunrise.time
-            )
-
-        if (noonElevation != null) {
-
-            return HORIZON +
-                (
-                    noonElevation.toDouble() -
-                    HORIZON
-                ) *
-                Math.sin(
-                    fraction *
-                    Math.PI /
-                    2
-                )
-        }
+    if (noonElevation == null || midnightElevation == null) {
+        log.warn "Cannot calculate sun elevation: noon/midnight elevation missing"
+        return null
     }
 
+    long nowMs = now.time
 
-    // ========================================================
-    // DAYLIGHT: SOLAR NOON -> SUNSET
-    // ========================================================
+    long noonMs =
+        solarNoon.time
 
-    if (
-        solarNoon &&
-        sunset &&
-        now.time > solarNoon.time &&
-        now.time <= sunset.time
-    ) {
+    long midnightMs =
+        solarMidnight.time
 
-        double fraction =
-            (now.time - solarNoon.time) /
-            (double)(
-                sunset.time -
-                solarNoon.time
-            )
+    /*
+     * Aurinko kulkee solar midnight -> solar noon
+     * sinikäyrän positiivisen puoliskon kautta.
+     *
+     * Keskipäivällä:
+     * elevation = noonElevation
+     *
+     * Keskiyöllä:
+     * elevation = midnightElevation
+     */
 
-        if (noonElevation != null) {
+    double dayLengthMs =
+        noonMs - midnightMs
 
-            return HORIZON +
-                (
-                    noonElevation.toDouble() -
-                    HORIZON
-                ) *
-                Math.cos(
-                    fraction *
-                    Math.PI /
-                    2
-                )
-        }
+    if (dayLengthMs <= 0) {
+        log.warn "Invalid solar day interval"
+        return null
     }
 
+    /*
+     * Kulma:
+     *
+     * midnight = -PI/2
+     * noon     = +PI/2
+     */
 
-    // ========================================================
-    // NIGHT: SOLAR MIDNIGHT -> SUNRISE
-    // ========================================================
+    double phase =
+        Math.PI *
+        (nowMs - midnightMs) /
+        dayLengthMs -
+        (Math.PI / 2.0)
 
-    if (
-        solarMidnight &&
-        sunrise &&
-        now.time >= solarMidnight.time &&
-        now.time < sunrise.time
-    ) {
+    /*
+     * Normaali tilanne:
+     *
+     * elevation = amplitude * sin(phase) + offset
+     *
+     * Sovitetaan amplitudi ja offset siten, että:
+     *
+     * noon     = noonElevation
+     * midnight = midnightElevation
+     */
 
-        if (midnightElevation != null) {
+    double offset =
+        (noonElevation + midnightElevation) / 2.0
 
-            double fraction =
-                (now.time - solarMidnight.time) /
-                (double)(
-                    sunrise.time -
-                    solarMidnight.time
-                )
+    double amplitude =
+        (noonElevation - midnightElevation) / 2.0
 
-            return midnightElevation.toDouble() +
-                (
-                    HORIZON -
-                    midnightElevation.toDouble()
-                ) *
-                Math.sin(
-                    fraction *
-                    Math.PI /
-                    2
-                )
-        }
+    double elevation =
+        offset + amplitude * Math.sin(phase)
+
+    /*
+     * Tämä antaa yöaikaan oikean negatiivisen arvon,
+     * mutta Sunrise API:n sunrise/sunset-pisteiden kohdalla
+     * haluamme käytännössä 0°.
+     *
+     * Käytetään sunrise/sunset-aikoja rajaamiseen.
+     */
+
+    if (sunrise && nowMs >= sunrise.time &&
+        sunset && nowMs <= sunset.time) {
+
+        // Päivän aikana käytetään laskettua arvoa.
+
+    } else if (sunrise && nowMs < sunrise.time) {
+
+        /*
+         * Ennen auringonnousua.
+         *
+         * Käytetään solar midnight -> sunrise -väliä.
+         * Interpolointi sinikäyrällä antaa negatiivisen
+         * korkeuden.
+         */
+
+    } else if (sunset && nowMs > sunset.time) {
+
+        /*
+         * Auringonlaskun jälkeen.
+         * Laskettu arvo saa jatkaa negatiivisena.
+         */
     }
 
+    log.debug "Sun elevation calculation: " +
+              "noon=${noonElevation}°, " +
+              "midnight=${midnightElevation}°, " +
+              "phase=${Math.toDegrees(phase)}°, " +
+              "elevation=${elevation}°"
 
-    // ========================================================
-    // NIGHT: SUNSET -> SOLAR MIDNIGHT
-    // ========================================================
-
-    if (
-        sunset &&
-        solarMidnight &&
-        now.time > sunset.time &&
-        now.time <= solarMidnight.time
-    ) {
-
-        if (midnightElevation != null) {
-
-            double fraction =
-                (now.time - sunset.time) /
-                (double)(
-                    solarMidnight.time -
-                    sunset.time
-                )
-
-            return HORIZON +
-                (
-                    midnightElevation.toDouble() -
-                    HORIZON
-                ) *
-                Math.sin(
-                    fraction *
-                    Math.PI /
-                    2
-                )
-        }
-    }
-
-
-    // ========================================================
-    // POLAR NIGHT / MIDNIGHT SUN
-    // ========================================================
-
-    if (!sunrise && !sunset) {
-
-        if (props.solarnoon?.visible == true &&
-            noonElevation != null) {
-
-            return noonElevation.toDouble()
-        }
-
-        if (midnightElevation != null) {
-
-            return midnightElevation.toDouble()
-        }
-
-        return -90.0
-    }
-
-
-    return null
+    return elevation
 }
+def calculateSunElevation2(
+    Date now,
+    Date sunrise,
+    Date solarNoon,
+    Date sunset,
+    Date solarMidnight,
+    def props
+) {
 
+    if (!location.latitude || !location.longitude) {
+        log.warn "Cannot calculate sun elevation: Hubitat location coordinates missing"
+        return null
+    }
+
+    double latitude = location.latitude.toDouble()
+    double longitude = location.longitude.toDouble()
+
+    // Current UTC time
+    Calendar utc = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+    utc.setTime(now)
+
+    int year = utc.get(Calendar.YEAR)
+    int dayOfYear = utc.get(Calendar.DAY_OF_YEAR)
+
+    double hour =
+        utc.get(Calendar.HOUR_OF_DAY) +
+        utc.get(Calendar.MINUTE) / 60.0 +
+        utc.get(Calendar.SECOND) / 3600.0
+
+    /*
+     * Solar position algorithm based on NOAA approximation.
+     */
+
+    double gamma =
+        2.0 * Math.PI / 365.0 *
+        (
+            dayOfYear - 1 +
+            (hour - 12.0) / 24.0
+        )
+
+    double declination =
+        0.006918 -
+        0.399912 * Math.cos(gamma) +
+        0.070257 * Math.sin(gamma) -
+        0.006758 * Math.cos(2 * gamma) +
+        0.000907 * Math.sin(2 * gamma) -
+        0.002697 * Math.cos(3 * gamma) +
+        0.001480 * Math.sin(3 * gamma)
+
+    double equationOfTime =
+        229.18 * (
+            0.000075 +
+            0.001868 * Math.cos(gamma) -
+            0.032077 * Math.sin(gamma) -
+            0.014615 * Math.cos(2 * gamma) -
+            0.040849 * Math.sin(2 * gamma)
+        )
+
+    /*
+     * UTC offset of Hubitat location.
+     */
+    TimeZone tz =
+        location.timeZone ?: TimeZone.getDefault()
+
+    int offsetMillis =
+        tz.getOffset(now.time)
+
+    double offsetHours =
+        offsetMillis / 3600000.0
+
+    /*
+     * True solar time in minutes.
+     */
+    double timeOffset =
+        equationOfTime +
+        4.0 * longitude -
+        60.0 * offsetHours
+
+    double trueSolarTime =
+        hour * 60.0 + timeOffset
+
+    /*
+     * Normalize to 0...1440.
+     */
+    while (trueSolarTime < 0) {
+        trueSolarTime += 1440
+    }
+
+    while (trueSolarTime >= 1440) {
+        trueSolarTime -= 1440
+    }
+
+    /*
+     * Solar hour angle.
+     */
+    double hourAngle =
+        trueSolarTime / 4.0 - 180.0
+
+    double latitudeRad =
+        Math.toRadians(latitude)
+
+    double hourAngleRad =
+        Math.toRadians(hourAngle)
+
+    /*
+     * Solar zenith angle.
+     */
+    double cosZenith =
+        Math.sin(latitudeRad) *
+        Math.sin(declination) +
+        Math.cos(latitudeRad) *
+        Math.cos(declination) *
+        Math.cos(hourAngleRad)
+
+    /*
+     * Protect against floating point rounding.
+     */
+    cosZenith =
+        Math.max(-1.0, Math.min(1.0, cosZenith))
+
+    double zenith =
+        Math.acos(cosZenith)
+
+    double elevation =
+        90.0 - Math.toDegrees(zenith)
+
+    log.debug "Solar calculation: lat=${latitude}, lon=${longitude}, " +
+              "day=${dayOfYear}, utcHour=${hour}, " +
+              "declination=${Math.toDegrees(declination)}, " +
+              "hourAngle=${hourAngle}, elevation=${elevation}"
+
+    return elevation
+}
 
 
 // ============================================================
@@ -1347,6 +1456,27 @@ def updateLightState(
             : 50.0
 
 
+    // --------------------------------------------------------
+    // Validate thresholds
+    // --------------------------------------------------------
+
+    if (darkLimit >= twilightLimit) {
+
+        log.warn(
+            "Invalid light thresholds: " +
+            "darkElevation (${darkLimit}) must be below " +
+            "twilightElevation (${twilightLimit}). " +
+            "Using dark=${twilightLimit - 0.1}"
+        )
+
+        darkLimit = twilightLimit - 0.1
+    }
+
+
+    // --------------------------------------------------------
+    // Read cloudiness
+    // --------------------------------------------------------
+
     Double cloudiness = null
 
     def cloudValue =
@@ -1357,40 +1487,83 @@ def updateLightState(
         try {
             cloudiness = cloudValue.toDouble()
         } catch (ignored) {
+            log.debug(
+                "Could not convert cloudiness '${cloudValue}' to number"
+            )
         }
     }
 
+
+    // --------------------------------------------------------
+    // Initial states
+    // Exactly ONE of these will become true.
+    // --------------------------------------------------------
 
     boolean daylight = false
     boolean twilight = false
     boolean dark = false
 
 
+    double sunElevation =
+        elevation.toDouble()
+
+
     // ========================================================
-    // DAYLIGHT
+    // 1. DAYLIGHT
+    // ========================================================
+    //
+    // Above the configured twilight elevation the sun is
+    // considered to provide daylight.
+    //
+    // Cloudiness does NOT change this.
     // ========================================================
 
-    if (elevation >= twilightLimit) {
+    if (sunElevation >= twilightLimit) {
 
         daylight = true
     }
 
 
     // ========================================================
-    // TWILIGHT
+    // 2. DARK
+    // ========================================================
+    //
+    // Below the configured dark elevation it is dark
+    // regardless of cloudiness.
+    //
+    // Example:
+    //   elevation = 2°
+    //   cloudiness = 0%
+    //
+    //   -> dark
     // ========================================================
 
-    else if (elevation >= darkLimit) {
+    else if (sunElevation < darkLimit) {
 
-        twilight = true
+        dark = true
+    }
 
-        /*
-         * Sun is still in twilight range.
-         *
-         * If the sun is below the twilight limit and
-         * cloudiness is high enough, consider it dark
-         * for indoor lighting automation.
-         */
+
+    // ========================================================
+    // 3. TWILIGHT / CLOUDY TWILIGHT
+    // ========================================================
+    //
+    // The sun is between the dark and twilight limits.
+    //
+    // Normally this is TWILIGHT.
+    //
+    // Heavy cloudiness can however make it dark enough for
+    // indoor lighting automation.
+    //
+    // In that case:
+    //
+    //   twilight = false
+    //   dark     = true
+    //
+    // They are therefore mutually exclusive.
+    // ========================================================
+
+    else {
 
         if (
             cloudiness != null &&
@@ -1398,19 +1571,17 @@ def updateLightState(
         ) {
 
             dark = true
+
+        } else {
+
+            twilight = true
         }
     }
 
 
     // ========================================================
-    // DARK
+    // EVENTS
     // ========================================================
-
-    else {
-
-        dark = true
-    }
-
 
     sendEvent(
         name: "daylight",
@@ -1425,6 +1596,19 @@ def updateLightState(
     sendEvent(
         name: "dark",
         value: dark ? "true" : "false"
+    )
+
+
+    // ========================================================
+    // DEBUG
+    // ========================================================
+
+    log.debug(
+        "Light state: elevation=${sunElevation}°, " +
+        "cloudiness=${cloudiness}%, " +
+        "daylight=${daylight}, " +
+        "twilight=${twilight}, " +
+        "dark=${dark}"
     )
 }
 
